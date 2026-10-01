@@ -55,27 +55,4 @@ void loop()
     Serial.println("No Message Found");
   }
   delay(1000);
-
-/*
-  count++;
-
-  value = EEPROM.read(0);
-  Serial.println("Read:");
-  Serial.print(count);
-  Serial.print('\t');
-  Serial.print(value);
-  Serial.println();
-
-  EEPROM.write(0, (int)random(255));
-
-  value = EEPROM.read(0);
-   Serial.println("Write:");
-  Serial.print(count);
-  Serial.print('\t');
-  Serial.print(value);
-  Serial.println();
-
-
-  delay(60000);
-  */
 }
