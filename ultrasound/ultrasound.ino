@@ -1,34 +1,58 @@
 #include <EEPROM.h>
+#include <avr/wdt.h>
 
 #define US1_TRIG_PIN 9
 #define US1_ECHO_PIN 10
 #define LED_PIN 8
 #define US2_TRIG_PIN 7
 #define US2_ECHO_PIN 6
+#define BUTTON_PIN 2
+#define ONBOARD_LED_PIN 13
+#define ECHO_PULSE_TIMEOUT_MICROSECONDS 20000 
 
 String messageString = "";
 bool messageComplete = false;
 int minDistance = 5; // in cm 
+bool warningLight = false;
+bool switchedOn = false;
+int loopCounter = 0;
+
 
 void setup() {
   Serial.begin(9600);
+
+  // clear garbage
+  Serial.flush();
+  while (Serial.available() > 0) {
+      Serial.read();
+  }
+
   pinMode(US1_TRIG_PIN, OUTPUT);
   pinMode(US1_ECHO_PIN, INPUT);
   pinMode(US2_TRIG_PIN, OUTPUT);
   pinMode(US2_ECHO_PIN, INPUT);
 
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(ONBOARD_LED_PIN, OUTPUT);
+
   // Configure the digital pin as an output
   pinMode(LED_PIN, OUTPUT);
   
   // Turn the LED off
-  digitalWrite(LED_PIN, LOW);
+  turnOffWarningLight();
   readEeprom();
+
+  // Enable watchdog with a 2-second timeout
+  wdt_enable(WDTO_2S);
+
+  Serial.println("Watchdog enabled");  
 }
 
-void writeToEeprom(String newMinDistanceString) {
-    for (int i = 0; i < newMinDistanceString.length(); ++i) {
-      char c = newMinDistanceString[i];
-      EEPROM.write(i, c);
+void writeToEeprom(int newMinDistance) {
+    String distanceString = String(newMinDistance) + '\n';
+
+    for (unsigned int i = 0; i < distanceString.length(); ++i) {
+        EEPROM.write(i, distanceString[i]);
     }
 }
 
@@ -57,7 +81,8 @@ String readEeprom() {
     
 
   } else {
-    Serial.println("Failed to read min distance from eprom");
+    Serial.print("Failed to read min distance from EEPROM. Using default:");
+    Serial.println(minDistance);
   }
 }
 
@@ -77,10 +102,13 @@ void serialEvent() {
   }
   if (messageComplete) {
     int newMinDistance = messageString.toInt();
-    if (newMinDistance) {
-      writeToEeprom(messageString);
-      Serial.println("New Min Distance: " + messageString);
+    if (newMinDistance > 0) {
+      writeToEeprom(newMinDistance);
+      Serial.print("New Min Distance: ");
+      Serial.println(newMinDistance);
       minDistance = newMinDistance;
+      turnOffWarningLight();
+
     } else {
       Serial.println("Invalid Distance: " + messageString);
     }
@@ -89,7 +117,7 @@ void serialEvent() {
   }
 }
 
-void loop() {
+void detectObjectLoop() {
   // Clear the trigger pin
   digitalWrite(US1_TRIG_PIN, LOW);
   digitalWrite(US2_TRIG_PIN, LOW);
@@ -100,15 +128,23 @@ void loop() {
   digitalWrite(US2_TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(US1_TRIG_PIN, LOW);
-  digitalWrite(US1_TRIG_PIN, LOW);
+  digitalWrite(US2_TRIG_PIN, LOW);
 
   // Read the echo pin pulse duration in microseconds
-  long duration1 = pulseIn(US1_ECHO_PIN, HIGH);
-  long duration2 = pulseIn(US2_ECHO_PIN, HIGH);
+  long duration1 = pulseIn(US1_ECHO_PIN, HIGH, ECHO_PULSE_TIMEOUT_MICROSECONDS);
+  long duration2 = pulseIn(US2_ECHO_PIN, HIGH, ECHO_PULSE_TIMEOUT_MICROSECONDS);
 
   // Calculate distance in cm (Speed of sound is ~0.0343 cm/µs, divided by 2 for round trip)
   float distance1 = getDistanceFromDuration(duration1);
+  Serial.print("Distance 1: ");
+  Serial.print(distance1);
+  Serial.println(" cm");
+
   float distance2 = getDistanceFromDuration(duration2);
+  Serial.print("Distance 2: ");
+  Serial.print(distance2);
+  Serial.println(" cm");
+
 
   float averageDistance = (distance1 + distance2) / 2;
 
@@ -116,11 +152,54 @@ void loop() {
   Serial.print(averageDistance);
   Serial.println(" cm");
 
-  if (averageDistance < minDistance) {
+  bool showWarning = (distance1 < minDistance && distance1 != 0) || (distance2 < minDistance && distance2 != 0);
+  if (showWarning && !warningLight) {
+    turnOnWarningLight();
+  } else if (!showWarning && warningLight) {
+    turnOffWarningLight();
+  }
+}
+
+void turnOnWarningLight() {
     digitalWrite(LED_PIN, HIGH);
-  } else {
+    warningLight = true;
+    Serial.println("Warning Light On");
+}
+
+void turnOffWarningLight() {
+    warningLight = false;
+    Serial.println("Warning Light Off");
     digitalWrite(LED_PIN, LOW);
+}
+
+void loop() {
+  wdt_reset();
+  int buttonState = digitalRead(BUTTON_PIN);
+
+  // Acts as a toggle button 
+  if (buttonState == LOW) {
+    Serial.print("Button pressed ");
+    switchedOn = !switchedOn;
+    Serial.print(switchedOn ? "On" : "Off");
+    digitalWrite(ONBOARD_LED_PIN, switchedOn ? HIGH : LOW);
+    delay(100);
+    loopCounter = 0;
+
+    // This is to test the watchdog - if you hold the button down for 2 seconds the watchdog is triggered
+    while (buttonState == LOW) {
+      // wdt_reset(); // This is commmented out to test the watchdog
+      buttonState = digitalRead(BUTTON_PIN);
+    }
+    if (!switchedOn) {
+      // Turn the LED off
+      turnOffWarningLight();
+    }
   }
 
-  delay(500);
+  // This code runs every 25 cycles. This enables a shorter delay on the main cycle to improve button sensitivity
+  if (switchedOn && loopCounter % 25 == 0) {
+    detectObjectLoop();
+  }
+  loopCounter++;
+  delay(20);
 }
