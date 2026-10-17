@@ -8,7 +8,9 @@
 #define US2_ECHO_PIN 6
 #define BUTTON_PIN 2
 #define ONBOARD_LED_PIN 13
-#define ECHO_PULSE_TIMEOUT_MICROSECONDS 20000 
+#define ECHO_PULSE_TIMEOUT_MICROSECONDS 20000
+#define ULTRASOUND_CYCLE_DELAY_MS 200
+#define MAIN_CYCLE_DELAY_MS 20
 
 String messageString = "";
 bool messageComplete = false;
@@ -176,11 +178,11 @@ void loop() {
   wdt_reset();
   int buttonState = digitalRead(BUTTON_PIN);
 
-  // Acts as a toggle button 
+  // Acts as a toggle button - LOW corresponds to button down
   if (buttonState == LOW) {
     Serial.print("Button pressed ");
     switchedOn = !switchedOn;
-    Serial.print(switchedOn ? "On" : "Off");
+    Serial.println(switchedOn ? "On" : "Off");
     digitalWrite(ONBOARD_LED_PIN, switchedOn ? HIGH : LOW);
     delay(100);
     loopCounter = 0;
@@ -196,10 +198,11 @@ void loop() {
     }
   }
 
-  // This code runs every 25 cycles. This enables a shorter delay on the main cycle to improve button sensitivity
-  if (switchedOn && loopCounter % 25 == 0) {
+  // Dont run the ultrasound loop every cycle to improve button sensitivity
+  int mainCyclesPerUltrasoundCycle = round(ULTRASOUND_CYCLE_DELAY_MS / MAIN_CYCLE_DELAY_MS);
+  if (switchedOn && loopCounter % mainCyclesPerUltrasoundCycle == 0) {
     detectObjectLoop();
   }
   loopCounter++;
-  delay(20);
+  delay(MAIN_CYCLE_DELAY_MS);
 }
